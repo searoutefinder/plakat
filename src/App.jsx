@@ -307,7 +307,7 @@ const adNr = Object.keys(adTypeJson).length;
 
         {/* Row count card */}
         <div className="bg-white rounded-2xl p-4 mb-5 flex justify-between items-center border border-stone-200">
-          <span className="text-sm text-stone-500">Rögzített sorok</span>
+          <span className="text-sm text-stone-500">Rögzített plakáthelyszínek</span>
           <span className="text-2xl font-bold text-slate-900">
             {rowCount === null ? "…" : rowCount}
           </span>
