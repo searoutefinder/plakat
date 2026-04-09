@@ -254,7 +254,7 @@ async function handleSave() {
                           : "bg-white text-slate-700 border-stone-300"
                       }`}
                     >
-                      {p.toUpperCase()}
+                      {p.toUpperCase() === "F" ? "Fidesz" : p.toUpperCase() === "T" ? "Tisza" : p.toUpperCase() === "M" ? "Mi Hazánk" : p.toUpperCase() === "D" ? "DK" : p.toUpperCase() === "K" ? "Kutyapárt" : p.toUpperCase()}
                     </button>
                   ))}
                 </div>
