@@ -35,12 +35,10 @@ export default function App() {
   const [step, setStep] = useState("idle"); // idle | parties | adtype | photo | saving
   const [record, setRecord] = useState(null);
   const [adTypeTarget, setAdTypeTarget] = useState(null); // which party we're picking ad_type for
-  const [photoPreview, setPhotoPreview] = useState(null);
-  const [photoFile, setPhotoFile] = useState(null);
+
   const [toast, setToast] = useState(null);
   const [pendingAdTypes, setPendingAdTypes] = useState([]); // parties that still need ad_type
   const fileInputRef = useRef();
-  const cameraInputRef = useRef();
 
   // fetch row count on mount
   useEffect(() => {
@@ -61,8 +59,6 @@ export default function App() {
     const { lat, lng } = await getLocation();
     const id = genId();
     setRecord({ id, timestamp: ts, lat, lng, parties: {}, photo: null });
-    setPhotoPreview(null);
-    setPhotoFile(null);
     setStep("parties");
   }
 
@@ -109,30 +105,11 @@ export default function App() {
     }
   }
 
-  // ── PHOTO ───────────────────────────────────────────────────────────────────
-  function handlePhotoCapture(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setPhotoFile(file);
-    const url = URL.createObjectURL(file);
-    setPhotoPreview(url);
-  }
-
-  function savePhotoLocally(file, id) {
-    // Save to device via download link trick
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(file);
-    link.download = `voteapp_${id}.jpg`;
-    link.click();
-  }
-
   // ── SAVE ────────────────────────────────────────────────────────────────────
 async function handleSave() {
   setStep("saving");
   try {
-    if (photoFile) {
-      savePhotoLocally(photoFile, record.id);
-    }
+
     const adTypeJson = Object.fromEntries(
       Object.entries(record.parties).filter(([, v]) => v !== null)
     );
@@ -146,7 +123,7 @@ async function handleSave() {
       latitude: record.lat,
       longitude: record.lng,
       parties: partiesStr,
-      foto: photoFile ? `voteapp_${record.id}.jpg` : "",
+      foto: "",
       ad_type: JSON.stringify(adTypeJson),
       ad_nr: adNr,
     });
@@ -173,8 +150,6 @@ async function handleSave() {
   function handleCancel() {
     setStep("idle");
     setRecord(null);
-    setPhotoPreview(null);
-    setPhotoFile(null);
   }
 
   // ── RENDER ──────────────────────────────────────────────────────────────────
@@ -183,7 +158,7 @@ async function handleSave() {
       {/* HEADER */}
       <header className="bg-slate-900 text-white px-5 py-4 flex items-center gap-3 sticky top-0 z-10">
         <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
-        <h1 className="text-sm font-semibold tracking-wide">VoteApp</h1>
+        <h1 className="text-sm font-semibold tracking-wide">Plakátrögzítő App</h1>
         <span className="ml-auto text-xs text-slate-400">v1.0</span>
       </header>
 
@@ -305,7 +280,7 @@ async function handleSave() {
                       onClick={() => selectAdType(a)}
                       className="py-4 rounded-xl border border-stone-200 bg-white text-slate-800 text-base font-bold hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all active:scale-95"
                     >
-                      {a}
+                      {a === "mo" ? "Molinó" : a === "mu" ? "Multireklám (buszmegálló stb.)" : a === "op" ? "Óriásplakát" : a === "nl" ? "Nagy laminált" : a === "kl" ? "Kis laminált" : a === "eg" ? "Egyéb" : a}
                     </button>
                   ))}
                 </div>
@@ -336,64 +311,37 @@ async function handleSave() {
             )}
 
             {/* ── STEP: PHOTO ── */}
-            {step === "photo" && (
-              <>
-                <h2 className="text-base font-semibold mb-4">Összefoglaló & Fotó</h2>
-
-                {/* Summary */}
-                {record && (
-                  <div className="space-y-2 mb-4">
-                    {Object.entries(record.parties).map(([p, v]) => (
-                      <div key={p} className="flex items-center gap-3 bg-stone-50 rounded-xl px-4 py-2">
-                        <span className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center text-xs font-bold">
-                          {p.toUpperCase()}
-                        </span>
-                        <span className="flex-1 text-sm text-stone-500">{PARTY_LABELS[p] ?? p}</span>
-                        <span className="text-xs font-semibold bg-emerald-100 text-emerald-800 px-2 py-1 rounded-lg">
-                          {v ?? "—"}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Photo area */}
-                <div
-                  className="border-2 border-dashed border-stone-300 rounded-2xl p-5 mb-5 flex flex-col items-center gap-3 cursor-pointer active:bg-stone-50"
-                  onClick={() => cameraInputRef.current?.click()}
-                >
-                  {photoPreview ? (
-                    <img src={photoPreview} alt="preview" className="w-full rounded-xl object-cover max-h-48" />
-                  ) : (
-                    <>
-                      <span className="text-3xl">📷</span>
-                      <span className="text-sm text-stone-400">Fotó készítése / választása</span>
-                    </>
-                  )}
-                </div>
-                {/* hidden camera input */}
-                <input
-                  ref={cameraInputRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  className="hidden"
-                  onChange={handlePhotoCapture}
-                />
-
-                <div className="flex gap-3">
-                  <button onClick={handleCancel} className="flex-1 py-3 rounded-xl bg-stone-100 text-stone-600 text-sm font-medium">
-                    Mégsem
-                  </button>
-                  <button
-                    onClick={handleSave}
-                    className="flex-1 py-3 rounded-xl bg-emerald-600 text-white text-sm font-semibold active:scale-95 transition-transform"
-                  >
-                    💾 Mentés
-                  </button>
-                </div>
-              </>
-            )}
+{step === "photo" && (
+  <>
+    <h2 className="text-base font-semibold mb-4">Összefoglaló</h2>
+    {record && (
+      <div className="space-y-2 mb-6">
+        {Object.entries(record.parties).map(([p, v]) => (
+          <div key={p} className="flex items-center gap-3 bg-stone-50 rounded-xl px-4 py-2">
+            <span className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center text-xs font-bold">
+              {p.toUpperCase()}
+            </span>
+            <span className="flex-1 text-sm text-stone-500">{PARTY_LABELS[p] ?? p}</span>
+            <span className="text-xs font-semibold bg-emerald-100 text-emerald-800 px-2 py-1 rounded-lg">
+              {v ?? "—"}
+            </span>
+          </div>
+        ))}
+      </div>
+    )}
+    <div className="flex gap-3">
+      <button onClick={handleCancel} className="flex-1 py-3 rounded-xl bg-stone-100 text-stone-600 text-sm font-medium">
+        Mégsem
+      </button>
+      <button
+        onClick={handleSave}
+        className="flex-1 py-3 rounded-xl bg-emerald-600 text-white text-sm font-semibold active:scale-95 transition-transform"
+      >
+        💾 Mentés
+      </button>
+    </div>
+  </>
+)}
           </div>
         </div>
       )}
