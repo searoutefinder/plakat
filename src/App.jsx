@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 import './App.css'
 
 // ── CONFIG ────────────────────────────────────────────────────────────────────
 // Cseréld le erre a saját Google Apps Script Web App URL-edet
-const SHEET_URL = "https://script.google.com/macros/s/AKfycbzP2j3isl0kW5rI6yn7pFMrAoMXg9ISkFAnslaH8d6_3dYsrUeC4hqPWAMTv_N7u3hA/exec";
+const SHEET_URL = "https://script.google.com/macros/s/AKfycbxd3NGOoWWDt86whCLGi8FdG8jpCXmDDDLEVRZ3oVFNAv2olVX9v3JxvthCrw9JKPRK/exec";
 
 const PARTIES = ["f", "t", "m", "d", "k"];
 const AD_TYPES = ["mo", "mu", "op", "nl", "kl", "eg"];
@@ -40,13 +42,147 @@ export default function App() {
   const [pendingAdTypes, setPendingAdTypes] = useState([]); // parties that still need ad_type
   const fileInputRef = useRef();
 
+const [records, setRecords] = useState([]);
+const mapContainerRef = useRef();
+const mapRef = useRef();  
+
   // fetch row count on mount
-  useEffect(() => {
+  /*useEffect(() => {
     fetch(SHEET_URL + "?action=count")
       .then((r) => r.json())
       .then((d) => setRowCount(d.count))
       .catch(() => setRowCount("?"));
-  }, []);
+  }, []);*/
+
+  useEffect(() => {
+    fetch(SHEET_URL + "?action=list")
+      .then((r) => r.json())
+      .then((d) => {
+        setRowCount(d.count);
+        setRecords(d.records ?? []);
+      })
+      .catch(() => setRowCount("?"));
+  }, []);  
+
+  useEffect(() => {
+    if (!mapContainerRef.current) return;
+
+    const map = new maplibregl.Map({
+      container: mapContainerRef.current,
+      style: {
+        version: 8,
+        sources: {
+          osm: {
+            type: "raster",
+            tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+            tileSize: 256,
+            attribution: "© OpenStreetMap contributors",
+          },
+        },
+        layers: [{ id: "osm", type: "raster", source: "osm" }],
+      },
+      center: [18.9302, 47.5112],
+      zoom: 11,
+    });
+
+    map.addControl(new maplibregl.NavigationControl(), "top-right");
+    mapRef.current = map;
+
+    map.on("load", () => {
+      map.addSource("records", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+
+      map.addLayer({
+        id: "records-circle",
+        type: "circle",
+        source: "records",
+        paint: {
+          "circle-radius": 8,
+          "circle-color": "#0f172a",
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "#ffffff",
+          "circle-opacity": 0.85,
+        },
+      });
+
+      map.on("click", "records-circle", (e) => {
+        const props = e.features[0].properties;
+        new maplibregl.Popup()
+          .setLngLat(e.features[0].geometry.coordinates)
+          .setHTML(`
+            <div style="font-size:13px;line-height:1.6">
+              <strong>${props.parties}</strong><br/>
+              ${props.ad_type}<br/>
+              <span style="color:#888;font-size:11px">${props.timestamp}</span>
+            </div>
+          `)
+          .addTo(map);
+      });
+
+      map.on("mouseenter", "records-circle", () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", "records-circle", () => {
+        map.getCanvas().style.cursor = "";
+      });
+    });
+
+    return () => map.remove();
+  }, []); 
+  
+useEffect(() => {
+  const map = mapRef.current;
+  if (!map) return;
+
+  const update = () => {
+    const features = records
+      .filter((r) => r.latitude && r.longitude)
+      .map((r) => ({
+        type: "Feature",
+        geometry: {
+          type: "Point",
+          coordinates: [parseFloat(r.longitude), parseFloat(r.latitude)],
+        },
+        properties: {
+          id: r.id,
+          timestamp: r.timestamp,
+          parties: r.parties,
+          ad_type: r.ad_type,
+          ad_nr: r.ad_nr,
+        },
+      }));
+
+    map.getSource("records")?.setData({
+      type: "FeatureCollection",
+      features,
+    });
+
+    if (features.length === 0) return;
+
+    if (features.length === 1) {
+      map.flyTo({ center: features[0].geometry.coordinates, zoom: 14 });
+      return;
+    }
+
+    const bounds = features.reduce(
+      (b, f) => b.extend(f.geometry.coordinates),
+      new maplibregl.LngLatBounds(
+        features[0].geometry.coordinates,
+        features[0].geometry.coordinates
+      )
+    );
+
+    map.fitBounds(bounds, { padding: 48, maxZoom: 16, duration: 800 });
+  };
+
+  if (map.isStyleLoaded()) {
+    update();
+  } else {
+    map.once("load", update);
+  }
+}, [records]); 
 
   function showToast(msg, type = "ok") {
     setToast({ msg, type });
@@ -142,6 +278,7 @@ const adNr = Object.keys(adTypeJson).length;
     const countRes = await fetch(SHEET_URL + "?action=count");
     const countData = await countRes.json();
     setRowCount(countData.count);
+    setRecords(countData.records ?? []);
     showToast(`Mentve! Összesen ${countData.count} sor.`, "ok");
   } catch (err) {
     showToast("Hiba a mentés során!", "err");
@@ -161,12 +298,13 @@ const adNr = Object.keys(adTypeJson).length;
       {/* HEADER */}
       <header className="bg-slate-900 text-white px-5 py-4 flex items-center gap-3 sticky top-0 z-10">
         <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
-        <h1 className="text-sm font-semibold tracking-wide">Plakátrögzítő App</h1>
+        <h1 className="text-sm font-semibold tracking-wide">Erre bezzeg telik</h1>
         <span className="ml-auto text-xs text-slate-400">v1.0</span>
       </header>
 
       {/* MAIN */}
       <main className="flex-1 p-5 pb-28">
+
         {/* Row count card */}
         <div className="bg-white rounded-2xl p-4 mb-5 flex justify-between items-center border border-stone-200">
           <span className="text-sm text-stone-500">Rögzített sorok</span>
@@ -174,6 +312,13 @@ const adNr = Object.keys(adTypeJson).length;
             {rowCount === null ? "…" : rowCount}
           </span>
         </div>
+
+        {/* Térkép */}
+        <div
+          ref={mapContainerRef}
+          className="rounded-2xl overflow-hidden mb-5 border border-stone-200"
+          style={{ height: "400px" }}
+        />        
 
         {/* Empty state */}
         {step === "idle" && (
