@@ -69,7 +69,8 @@ export default function App() {
       if (parties[p] !== undefined) {
         delete parties[p];
       } else {
-        parties[p] = null; // no ad_type yet
+        //parties[p] = null; // no ad_type yet
+        parties[p] = { adType: null, qty: 1 };
       }
       return { ...r, parties };
     });
@@ -79,7 +80,9 @@ export default function App() {
     const selected = Object.keys(record.parties);
     if (selected.length === 0) return showToast("Válassz legalább egy pártot!", "err");
     // determine which parties need ad_type
-    const needAdType = selected.filter((p) => record.parties[p] === null);
+    //const needAdType = selected.filter((p) => record.parties[p] === null);
+    const needAdType = selected.filter((p) => record.parties[p].adType === null);
+
     if (needAdType.length === 0) {
       setStep("photo");
       return;
@@ -93,16 +96,9 @@ export default function App() {
   function selectAdType(adType) {
     setRecord((r) => ({
       ...r,
-      parties: { ...r.parties, [adTypeTarget]: adType },
+      parties: { ...r.parties, [adTypeTarget]: { adType, qty: 1 } },
     }));
-    const remaining = pendingAdTypes.filter((p) => p !== adTypeTarget);
-    setPendingAdTypes(remaining);
-    if (remaining.length > 0) {
-      setAdTypeTarget(remaining[0]);
-    } else {
-      setAdTypeTarget(null);
-      setStep("photo");
-    }
+    // itt megállunk — a Tovább gomb visz a következő pártra
   }
 
   // ── SAVE ────────────────────────────────────────────────────────────────────
@@ -110,10 +106,17 @@ async function handleSave() {
   setStep("saving");
   try {
 
-    const adTypeJson = Object.fromEntries(
+    /*const adTypeJson = Object.fromEntries(
       Object.entries(record.parties).filter(([, v]) => v !== null)
     );
-    const adNr = Object.keys(adTypeJson).length;
+    const adNr = Object.keys(adTypeJson).length;*/
+const adTypeJson = Object.fromEntries(
+  Object.entries(record.parties)
+    .filter(([, v]) => v.adType !== null)
+    .map(([p, v]) => [p, { type: v.adType, qty: v.qty }])
+);
+const adNr = Object.keys(adTypeJson).length;
+
     const partiesStr = Object.keys(record.parties).join(",");
 
     const params = new URLSearchParams({
@@ -262,53 +265,142 @@ async function handleSave() {
             )}
 
             {/* ── STEP: AD TYPE ── */}
-            {step === "adtype" && adTypeTarget && (
-              <>
-                <h2 className="text-base font-semibold mb-1">
-                  Hirdetés típusa —{" "}
-                  <span className="text-slate-500 font-normal">
-                    {PARTY_LABELS[adTypeTarget] ?? adTypeTarget.toUpperCase()}
-                  </span>
-                </h2>
-                <p className="text-xs text-stone-400 mb-4">
-                  {pendingAdTypes.length} párt maradt ({pendingAdTypes.join(", ")})
-                </p>
-                <div className="grid grid-cols-3 gap-2 mb-6">
-                  {AD_TYPES.map((a) => (
-                    <button
-                      key={a}
-                      onClick={() => selectAdType(a)}
-                      className="py-4 rounded-xl border border-stone-200 bg-white text-slate-800 text-base font-bold hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all active:scale-95"
-                    >
-                      {a === "mo" ? "Molinó" : a === "mu" ? "Multireklám (buszmegálló stb.)" : a === "op" ? "Óriásplakát" : a === "nl" ? "Nagy laminált" : a === "kl" ? "Kis laminált" : a === "eg" ? "Egyéb" : a}
-                    </button>
-                  ))}
-                </div>
-                {/* Summary of already assigned */}
-                {record && (
-                  <div className="space-y-2 mb-4">
-                    {Object.entries(record.parties)
-                      .filter(([, v]) => v !== null)
-                      .map(([p, v]) => (
-                        <div key={p} className="flex items-center gap-3 bg-stone-50 rounded-xl px-4 py-2">
-                          <span className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center text-xs font-bold">
-                            {p.toUpperCase()}
-                          </span>
-                          <span className="flex-1 text-sm text-stone-500">
-                            {PARTY_LABELS[p] ?? p}
-                          </span>
-                          <span className="text-xs font-semibold bg-emerald-100 text-emerald-800 px-2 py-1 rounded-lg">
-                            {v}
-                          </span>
-                        </div>
-                      ))}
-                  </div>
-                )}
-                <button onClick={handleCancel} className="w-full py-3 rounded-xl bg-stone-100 text-stone-600 text-sm font-medium">
-                  Mégsem
-                </button>
-              </>
-            )}
+{step === "adtype" && adTypeTarget && (
+  <>
+    <h2 className="text-base font-semibold mb-1">
+      Hirdetés —{" "}
+      <span className="text-slate-500 font-normal">
+        {PARTY_LABELS[adTypeTarget] ?? adTypeTarget.toUpperCase()}
+      </span>
+    </h2>
+    <p className="text-xs text-stone-400 mb-4">
+      {pendingAdTypes.length} párt maradt ({pendingAdTypes.join(", ")})
+    </p>
+
+    {record.parties[adTypeTarget]?.adType === null ? (
+      <>
+        <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider mb-2">Típus</p>
+        <div className="grid grid-cols-3 gap-2 mb-4">
+          {AD_TYPES.map((a) => (
+            <button
+              key={a}
+              onClick={() => selectAdType(a)}
+              className="py-4 rounded-xl border border-stone-200 bg-white text-slate-800 text-base font-bold hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all active:scale-95"
+            >
+              {a === "mo" ? 
+              "Molinó" : 
+              a === "mu" ? 
+              "Multireklám (busz stb.)" : 
+              a === "op" ? 
+              "Óriásplakát" : 
+              a === "nl" ? 
+              "Nagy laminált" : 
+              a === "kl" ? 
+              "Kis laminált" : 
+              a === "eg" ? 
+              "Egyéb" : 
+              a}
+            </button>
+          ))}
+        </div>
+      </>
+    ) : (
+      <>
+        <div className="flex items-center gap-3 bg-stone-50 rounded-xl px-4 py-3 mb-4">
+          <span className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center text-xs font-bold">
+            {adTypeTarget.toUpperCase()}
+          </span>
+          <span className="flex-1 text-sm font-medium">{record.parties[adTypeTarget].adType}</span>
+        </div>
+        <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider mb-3">Mennyiség</p>
+        <div className="flex items-center justify-center gap-6 mb-6">
+          <button
+            onClick={() =>
+              setRecord((r) => ({
+                ...r,
+                parties: {
+                  ...r.parties,
+                  [adTypeTarget]: {
+                    ...r.parties[adTypeTarget],
+                    qty: Math.max(1, r.parties[adTypeTarget].qty - 1),
+                  },
+                },
+              }))
+            }
+            className="w-12 h-12 rounded-full bg-stone-100 text-slate-700 text-2xl font-bold flex items-center justify-center active:scale-95 transition-transform"
+          >
+            −
+          </button>
+          <span className="text-4xl font-bold text-slate-900 w-12 text-center">
+            {record.parties[adTypeTarget].qty}
+          </span>
+          <button
+            onClick={() =>
+              setRecord((r) => ({
+                ...r,
+                parties: {
+                  ...r.parties,
+                  [adTypeTarget]: {
+                    ...r.parties[adTypeTarget],
+                    qty: r.parties[adTypeTarget].qty + 1,
+                  },
+                },
+              }))
+            }
+            className="w-12 h-12 rounded-full bg-slate-900 text-white text-2xl font-bold flex items-center justify-center active:scale-95 transition-transform"
+          >
+            +
+          </button>
+        </div>
+        <button
+          onClick={() => {
+            const remaining = pendingAdTypes.filter((p) => p !== adTypeTarget);
+            setPendingAdTypes(remaining);
+            if (remaining.length > 0) {
+              setAdTypeTarget(remaining[0]);
+              setRecord((r) => ({
+                ...r,
+                parties: {
+                  ...r.parties,
+                  [remaining[0]]: { adType: null, qty: 1 },
+                },
+              }));
+            } else {
+              setAdTypeTarget(null);
+              setStep("photo");
+            }
+          }}
+          className="w-full py-3 rounded-xl bg-slate-900 text-white text-sm font-semibold active:scale-95 transition-transform"
+        >
+          Tovább →
+        </button>
+      </>
+    )}
+
+    {/* Már hozzárendelt pártok összefoglalója */}
+    {record && (
+      <div className="space-y-2 mt-4">
+        {Object.entries(record.parties)
+          .filter(([, v]) => v.adType !== null)
+          .map(([p, v]) => (
+            <div key={p} className="flex items-center gap-3 bg-stone-50 rounded-xl px-4 py-2">
+              <span className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center text-xs font-bold">
+                {p.toUpperCase()}
+              </span>
+              <span className="flex-1 text-sm text-stone-500">{PARTY_LABELS[p] ?? p}</span>
+              <span className="text-xs font-semibold bg-emerald-100 text-emerald-800 px-2 py-1 rounded-lg">
+                {v.adType} × {v.qty}
+              </span>
+            </div>
+          ))}
+      </div>
+    )}
+
+    <button onClick={handleCancel} className="w-full py-3 rounded-xl bg-stone-100 text-stone-600 text-sm font-medium mt-3">
+      Mégsem
+    </button>
+  </>
+)}
 
             {/* ── STEP: PHOTO ── */}
 {step === "photo" && (
@@ -322,9 +414,9 @@ async function handleSave() {
               {p.toUpperCase()}
             </span>
             <span className="flex-1 text-sm text-stone-500">{PARTY_LABELS[p] ?? p}</span>
-            <span className="text-xs font-semibold bg-emerald-100 text-emerald-800 px-2 py-1 rounded-lg">
-              {v ?? "—"}
-            </span>
+<span className="text-xs font-semibold bg-emerald-100 text-emerald-800 px-2 py-1 rounded-lg">
+  {v.adType ?? "—"} × {v.qty}
+</span>
           </div>
         ))}
       </div>
