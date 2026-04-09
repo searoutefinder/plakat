@@ -20,6 +20,22 @@ function formatTs(d) {
   return d.toISOString().replace("T", " ").slice(0, 19);
 }
 
+const LS_KEY = "voteapp_records";
+
+function loadLocalRecords() {
+  try {
+    return JSON.parse(localStorage.getItem(LS_KEY) ?? "[]");
+  } catch {
+    return [];
+  }
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(2) + " MB";
+}
+
 async function getLocation() {
   return new Promise((res, rej) =>
     navigator.geolocation
@@ -45,6 +61,11 @@ export default function App() {
 const [records, setRecords] = useState([]);
 const mapContainerRef = useRef();
 const mapRef = useRef();  
+const geolocateRef = useRef(null);
+
+const [localRecords, setLocalRecords] = useState([]);
+const [syncStatus, setSyncStatus] = useState("idle"); // idle | syncing | done | error
+const [storageInfo, setStorageInfo] = useState({ used: 0, total: 5 * 1024 * 1024 });
 
   // fetch row count on mount
   /*useEffect(() => {
@@ -55,14 +76,16 @@ const mapRef = useRef();
   }, []);*/
 
   useEffect(() => {
-    fetch(SHEET_URL + "?action=list")
+    const local = loadLocalRecords();
+    setLocalRecords(local);
+    setRecords(local);
+    updateStorageInfo();
+    // rowCount-ot továbbra is a sheet-ből kérjük
+    fetch(SHEET_URL + "?action=count")
       .then((r) => r.json())
-      .then((d) => {
-        setRowCount(d.count);
-        setRecords(d.records ?? []);
-      })
+      .then((d) => setRowCount(d.count))
       .catch(() => setRowCount("?"));
-  }, []);  
+  }, []); 
 
   useEffect(() => {
     if (!mapContainerRef.current) return;
@@ -87,6 +110,18 @@ const mapRef = useRef();
 
     map.addControl(new maplibregl.NavigationControl(), "top-right");
     mapRef.current = map;
+
+    const geolocate = new maplibregl.GeolocateControl({
+      positionOptions: {
+        enableHighAccuracy: true,
+      },
+      trackUserLocation: true,
+      showUserLocation: true,
+      showAccuracyCircle: true,
+    });
+
+    map.addControl(geolocate, "top-right");
+    geolocateRef.current = geolocate;    
 
     map.on("load", () => {
       map.addSource("records", {
@@ -127,6 +162,9 @@ const mapRef = useRef();
       map.on("mouseleave", "records-circle", () => {
         map.getCanvas().style.cursor = "";
       });
+      setTimeout(() => {
+        geolocate.trigger();
+      }, 500);      
     });
 
     return () => map.remove();
@@ -154,27 +192,13 @@ useEffect(() => {
         },
       }));
 
-    map.getSource("records")?.setData({
-      type: "FeatureCollection",
-      features,
-    });
-
-    if (features.length === 0) return;
-
-    if (features.length === 1) {
-      map.flyTo({ center: features[0].geometry.coordinates, zoom: 14 });
-      return;
+    const source = map.getSource("records");
+    if (source) {
+      source.setData({
+        type: "FeatureCollection",
+        features,
+      });
     }
-
-    const bounds = features.reduce(
-      (b, f) => b.extend(f.geometry.coordinates),
-      new maplibregl.LngLatBounds(
-        features[0].geometry.coordinates,
-        features[0].geometry.coordinates
-      )
-    );
-
-    map.fitBounds(bounds, { padding: 48, maxZoom: 16, duration: 800 });
   };
 
   if (map.isStyleLoaded()) {
@@ -183,6 +207,25 @@ useEffect(() => {
     map.once("load", update);
   }
 }, [records]); 
+
+function saveLocalRecords(recs) {
+  localStorage.setItem(LS_KEY, JSON.stringify(recs));
+  updateStorageInfo();
+}
+
+function updateStorageInfo() {
+  try {
+    let used = 0;
+    for (let k in localStorage) {
+      if (localStorage.hasOwnProperty(k)) {
+        used += (localStorage[k].length + k.length) * 2;
+      }
+    }
+    setStorageInfo({ used, total: 5 * 1024 * 1024 });
+  } catch {
+    setStorageInfo({ used: 0, total: 5 * 1024 * 1024 });
+  }
+}
 
   function showToast(msg, type = "ok") {
     setToast({ msg, type });
@@ -238,54 +281,79 @@ useEffect(() => {
   }
 
   // ── SAVE ────────────────────────────────────────────────────────────────────
-async function handleSave() {
-  setStep("saving");
-  try {
+  async function handleSave() {
+    alert("Saving")
+    setStep("saving");
+    try {
+      const adTypeJson = Object.fromEntries(
+        Object.entries(record.parties)
+          .filter(([, v]) => v.adType !== null)
+          .map(([p, v]) => [p, { type: v.adType, qty: v.qty }])
+      );
+      const adNr = Object.keys(adTypeJson).length;
+      const partiesStr = Object.keys(record.parties).join(",");
 
-    /*const adTypeJson = Object.fromEntries(
-      Object.entries(record.parties).filter(([, v]) => v !== null)
-    );
-    const adNr = Object.keys(adTypeJson).length;*/
-const adTypeJson = Object.fromEntries(
-  Object.entries(record.parties)
-    .filter(([, v]) => v.adType !== null)
-    .map(([p, v]) => [p, { type: v.adType, qty: v.qty }])
-);
-const adNr = Object.keys(adTypeJson).length;
+      const newRec = {
+        id: record.id,
+        timestamp: record.timestamp,
+        latitude: record.lat,
+        longitude: record.lng,
+        parties: partiesStr,
+        foto: "",
+        ad_type: JSON.stringify(adTypeJson),
+        ad_nr: adNr,
+      };
 
-    const partiesStr = Object.keys(record.parties).join(",");
-
-    const params = new URLSearchParams({
-      action: "insert",
-      id: record.id,
-      timestamp: record.timestamp,
-      latitude: record.lat,
-      longitude: record.lng,
-      parties: partiesStr,
-      foto: "",
-      ad_type: JSON.stringify(adTypeJson),
-      ad_nr: adNr,
-    });
-
-    await fetch(SHEET_URL, {
-      method: "POST",
-      mode: "no-cors",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: params.toString(),
-    });
-
-    // no-cors miatt opaque a válasz, külön GET-tel kérjük le a sorszámot
-    const countRes = await fetch(SHEET_URL + "?action=count");
-    const countData = await countRes.json();
-    setRowCount(countData.count);
-    setRecords(countData.records ?? []);
-    showToast(`Mentve! Összesen ${countData.count} sor.`, "ok");
-  } catch (err) {
-    showToast("Hiba a mentés során!", "err");
+      const updated = [...loadLocalRecords(), newRec];
+      console.log(updated);
+      saveLocalRecords(updated);
+      setLocalRecords(updated);
+      setRecords(updated);
+      showToast(`Helyi mentés kész! (${updated.length} db)`, "ok");
+    } catch (err) {
+      showToast("Hiba a mentés során!", "err");
+    }
+    setStep("idle");
+    setRecord(null);
   }
-  setStep("idle");
-  setRecord(null);
-}
+
+  async function handleSync() {
+    const local = loadLocalRecords();
+    if (local.length === 0) return showToast("Nincs helyi adat!", "err");
+
+    setSyncStatus("syncing");
+    try {
+      let successCount = 0;
+      for (const rec of local) {
+        const params = new URLSearchParams({ action: "insert", ...rec });
+        await fetch(SHEET_URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: params.toString(),
+        });
+        successCount++;
+      }
+
+      // sorszám frissítése
+      const countRes = await fetch(SHEET_URL + "?action=count");
+      const countData = await countRes.json();
+      setRowCount(countData.count);
+
+      // localStorage törlése
+      localStorage.removeItem(LS_KEY);
+      setLocalRecords([]);
+      setRecords([]);
+      updateStorageInfo();
+      setSyncStatus("done");
+      showToast(`${successCount} rekord szinkronizálva!`, "ok");
+      setTimeout(() => setSyncStatus("idle"), 3000);
+    } catch (err) {
+      setSyncStatus("error");
+      showToast("Szinkron hiba!", "err");
+      setTimeout(() => setSyncStatus("idle"), 3000);
+    }
+  }   
 
   function handleCancel() {
     setStep("idle");
@@ -311,6 +379,53 @@ const adNr = Object.keys(adTypeJson).length;
           <span className="text-2xl font-bold text-slate-900">
             {rowCount === null ? "…" : rowCount}
           </span>
+        </div>
+
+        {/* Storage meter + Sync */}
+        <div className="bg-white rounded-2xl p-4 mb-5 border border-stone-200">
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xs font-semibold text-stone-500 uppercase tracking-wider">
+              Helyi tárhely
+            </span>
+            <span className="text-xs text-stone-400">
+              {formatBytes(storageInfo.used)} / {formatBytes(storageInfo.total)}
+            </span>
+          </div>
+          {/* progress bar */}
+          <div className="w-full h-2 bg-stone-100 rounded-full overflow-hidden mb-3">
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{
+                width: `${Math.min(100, (storageInfo.used / storageInfo.total) * 100).toFixed(1)}%`,
+                background: storageInfo.used / storageInfo.total > 0.8
+                  ? "#ef4444"
+                  : storageInfo.used / storageInfo.total > 0.5
+                  ? "#f59e0b"
+                  : "#0f172a",
+              }}
+            />
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-sm text-stone-500">
+              <strong className="text-slate-900">{localRecords.length}</strong> helyi rekord
+            </span>
+            <button
+              onClick={handleSync}
+              disabled={syncStatus === "syncing" || localRecords.length === 0}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold disabled:opacity-40 active:scale-95 transition-all"
+            >
+              {syncStatus === "syncing" ? (
+                <>
+                  <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Szinkron…
+                </>
+              ) : syncStatus === "done" ? (
+                "✓ Kész!"
+              ) : (
+                "↑ Sheet szinkron"
+              )}
+            </button>
+          </div>
         </div>
 
         {/* Térkép */}
