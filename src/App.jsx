@@ -553,12 +553,6 @@ export default function App() {
           </div>
         </div>               
 
-        {/* Empty state */}
-        {step === "idle" && (
-          <p className="text-center text-stone-400 text-sm mt-16">
-            Nyomj a&nbsp;<strong className="text-slate-700">+</strong>&nbsp;gombra új rekord hozzáadásához
-          </p>
-        )}
       </main>
 
       {/* FAB */}
