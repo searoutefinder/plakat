@@ -58,32 +58,29 @@ export default function App() {
   const [pendingAdTypes, setPendingAdTypes] = useState([]); // parties that still need ad_type
   const fileInputRef = useRef();
 
-const [records, setRecords] = useState([]);
-const mapContainerRef = useRef();
-const mapRef = useRef();  
-const geolocateRef = useRef(null);
+  const [records, setRecords] = useState([]);
+  const mapContainerRef = useRef();
+  const mapRef = useRef();  
+  const geolocateRef = useRef(null);
 
-const [localRecords, setLocalRecords] = useState([]);
-const [syncStatus, setSyncStatus] = useState("idle"); // idle | syncing | done | error
-const [storageInfo, setStorageInfo] = useState({ used: 0, total: 5 * 1024 * 1024 });
+  const [localRecords, setLocalRecords] = useState([]);
+  const [syncStatus, setSyncStatus] = useState("idle"); // idle | syncing | done | error
+  const [storageInfo, setStorageInfo] = useState({ used: 0, total: 5 * 1024 * 1024 });
 
-  // fetch row count on mount
-  /*useEffect(() => {
-    fetch(SHEET_URL + "?action=count")
-      .then((r) => r.json())
-      .then((d) => setRowCount(d.count))
-      .catch(() => setRowCount("?"));
-  }, []);*/
+  const [sheetRecords, setSheetRecords] = useState([]);
 
   useEffect(() => {
     const local = loadLocalRecords();
     setLocalRecords(local);
     setRecords(local);
     updateStorageInfo();
-    // rowCount-ot továbbra is a sheet-ből kérjük
-    fetch(SHEET_URL + "?action=count")
+
+    fetch(SHEET_URL + "?action=list")
       .then((r) => r.json())
-      .then((d) => setRowCount(d.count))
+      .then((d) => {
+        setRowCount(d.count);
+        setSheetRecords(d.records ?? []);
+      })
       .catch(() => setRowCount("?"));
   }, []); 
 
@@ -124,6 +121,48 @@ const [storageInfo, setStorageInfo] = useState({ used: 0, total: 5 * 1024 * 1024
     geolocateRef.current = geolocate;    
 
     map.on("load", () => {
+
+      // Sheet rekordok forrása
+      map.addSource("sheet-records", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+
+      // Sheet rekordok rétege — más szín hogy megkülönböztethető legyen
+      map.addLayer({
+        id: "sheet-records-circle",
+        type: "circle",
+        source: "sheet-records",
+        paint: {
+          "circle-radius": 8,
+          "circle-color": "#059669",
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "#ffffff",
+          "circle-opacity": 0.85,
+        },
+      });
+
+      map.on("click", "sheet-records-circle", (e) => {
+        const props = e.features[0].properties;
+        new maplibregl.Popup()
+          .setLngLat(e.features[0].geometry.coordinates)
+          .setHTML(`
+            <div style="font-size:13px;line-height:1.6">
+              <strong>${props.parties}</strong><br/>
+              ${props.ad_type}<br/>
+              <span style="color:#888;font-size:11px">${props.timestamp}</span>
+            </div>
+          `)
+          .addTo(map);
+      });
+
+      map.on("mouseenter", "sheet-records-circle", () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", "sheet-records-circle", () => {
+        map.getCanvas().style.cursor = "";
+      });
+
       map.addSource("records", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -162,6 +201,7 @@ const [storageInfo, setStorageInfo] = useState({ used: 0, total: 5 * 1024 * 1024
       map.on("mouseleave", "records-circle", () => {
         map.getCanvas().style.cursor = "";
       });
+
       setTimeout(() => {
         geolocate.trigger();
       }, 500);      
@@ -169,63 +209,127 @@ const [storageInfo, setStorageInfo] = useState({ used: 0, total: 5 * 1024 * 1024
 
     return () => map.remove();
   }, []); 
-  
-useEffect(() => {
-  const map = mapRef.current;
-  if (!map) return;
 
-  const update = () => {
-    const features = records
-      .filter((r) => r.latitude && r.longitude)
-      .map((r) => ({
-        type: "Feature",
-        geometry: {
-          type: "Point",
-          coordinates: [parseFloat(r.longitude), parseFloat(r.latitude)],
-        },
-        properties: {
-          id: r.id,
-          timestamp: r.timestamp,
-          parties: r.parties,
-          ad_type: r.ad_type,
-          ad_nr: r.ad_nr,
-        },
-      }));
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
 
-    const source = map.getSource("records");
-    if (source) {
-      source.setData({
-        type: "FeatureCollection",
-        features,
-      });
-    }
-  };
+    const update = () => {
+      const features = sheetRecords
+        .filter((r) => r.latitude && r.longitude)
+        .map((r) => ({
+          type: "Feature",
+          geometry: {
+            type: "Point",
+            coordinates: [parseFloat(r.longitude), parseFloat(r.latitude)],
+          },
+          properties: {
+            id: r.id,
+            timestamp: r.timestamp,
+            parties: r.parties,
+            ad_type: r.ad_type,
+            ad_nr: r.ad_nr,
+          },
+        }));
 
-  if (map.isStyleLoaded()) {
-    update();
-  } else {
-    map.once("load", update);
-  }
-}, [records]); 
-
-function saveLocalRecords(recs) {
-  localStorage.setItem(LS_KEY, JSON.stringify(recs));
-  updateStorageInfo();
-}
-
-function updateStorageInfo() {
-  try {
-    let used = 0;
-    for (let k in localStorage) {
-      if (localStorage.hasOwnProperty(k)) {
-        used += (localStorage[k].length + k.length) * 2;
+      const source = map.getSource("sheet-records");
+      if (source) {
+        source.setData({ type: "FeatureCollection", features });
       }
+
+      // bounds igazítása az összes rekordra (helyi + sheet)
+      const allFeatures = [
+        ...features,
+        ...records
+          .filter((r) => r.latitude && r.longitude)
+          .map((r) => ({
+            geometry: {
+              coordinates: [parseFloat(r.longitude), parseFloat(r.latitude)],
+            },
+          })),
+      ];
+
+      if (allFeatures.length === 0) return;
+
+      if (allFeatures.length === 1) {
+        map.flyTo({ center: allFeatures[0].geometry.coordinates, zoom: 14 });
+        return;
+      }
+
+      const bounds = allFeatures.reduce(
+        (b, f) => b.extend(f.geometry.coordinates),
+        new maplibregl.LngLatBounds(
+          allFeatures[0].geometry.coordinates,
+          allFeatures[0].geometry.coordinates
+        )
+      );
+
+      map.fitBounds(bounds, { padding: 48, maxZoom: 16, duration: 800 });
+    };
+
+    if (map.isStyleLoaded()) {
+      update();
+    } else {
+      map.once("load", update);
     }
-    setStorageInfo({ used, total: 5 * 1024 * 1024 });
-  } catch {
-    setStorageInfo({ used: 0, total: 5 * 1024 * 1024 });
+  }, [sheetRecords]);  
+  
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const update = () => {
+      const features = records
+        .filter((r) => r.latitude && r.longitude)
+        .map((r) => ({
+          type: "Feature",
+          geometry: {
+            type: "Point",
+            coordinates: [parseFloat(r.longitude), parseFloat(r.latitude)],
+          },
+          properties: {
+            id: r.id,
+            timestamp: r.timestamp,
+            parties: r.parties,
+            ad_type: r.ad_type,
+            ad_nr: r.ad_nr,
+          },
+        }));
+
+      const source = map.getSource("records");
+      if (source) {
+        source.setData({
+          type: "FeatureCollection",
+          features,
+        });
+      }
+    };
+
+    if (map.isStyleLoaded()) {
+      update();
+    } else {
+      map.once("load", update);
+    }
+  }, [records]); 
+
+  function saveLocalRecords(recs) {
+    localStorage.setItem(LS_KEY, JSON.stringify(recs));
+    updateStorageInfo();
   }
-}
+
+  function updateStorageInfo() {
+    try {
+      let used = 0;
+      for (let k in localStorage) {
+        if (localStorage.hasOwnProperty(k)) {
+          used += (localStorage[k].length + k.length) * 2;
+        }
+      }
+      setStorageInfo({ used, total: 5 * 1024 * 1024 });
+    } catch {
+      setStorageInfo({ used: 0, total: 5 * 1024 * 1024 });
+    }
+  }
 
   function showToast(msg, type = "ok") {
     setToast({ msg, type });
@@ -282,7 +386,6 @@ function updateStorageInfo() {
 
   // ── SAVE ────────────────────────────────────────────────────────────────────
   async function handleSave() {
-    alert("Saving")
     setStep("saving");
     try {
       const adTypeJson = Object.fromEntries(
@@ -343,7 +446,11 @@ function updateStorageInfo() {
       // localStorage törlése
       localStorage.removeItem(LS_KEY);
       setLocalRecords([]);
-      setRecords([]);
+      setRecords([]);      
+      const listRes = await fetch(SHEET_URL + "?action=list");
+      const listData = await listRes.json();
+      setSheetRecords(listData.records ?? []);
+      setRowCount(listData.count);      
       updateStorageInfo();
       setSyncStatus("done");
       showToast(`${successCount} rekord szinkronizálva!`, "ok");
@@ -433,7 +540,18 @@ function updateStorageInfo() {
           ref={mapContainerRef}
           className="rounded-2xl overflow-hidden mb-5 border border-stone-200"
           style={{ height: "400px" }}
-        />        
+        /> 
+
+        <div className="flex gap-4 px-1 mb-5">
+          <div className="flex items-center gap-2">
+            <span className="w-3 h-3 rounded-full bg-slate-900 border-2 border-white shadow" />
+            <span className="text-xs text-stone-500">Helyi (nem szinkronizált)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-3 h-3 rounded-full bg-emerald-600 border-2 border-white shadow" />
+            <span className="text-xs text-stone-500">Sheet</span>
+          </div>
+        </div>               
 
         {/* Empty state */}
         {step === "idle" && (
